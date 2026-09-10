@@ -26,6 +26,27 @@ verified, tried, and decided belongs in the commit message and the PR body.
 
 ## This repo
 
-- **This package is a reference and a smoke test, so keep it minimal.** Its value is being the simplest thing that installs, starts, publishes an address, and backs up — resist adding actions, config, or state to demonstrate a feature. Demonstrate those in the packaging guide instead.
-- **riscv64 is declared here and almost nowhere else.** That is deliberate: this is what gets installed first on a new StartOS platform to prove the packaging runtime works there. Don't drop it to match the rest of the fleet.
-- **The `main` volume is mounted but unused**, so the volume and backup paths are exercised. Don't remove it, and don't invent a store for it.
+This package wraps [route96](https://github.com/v0l/route96), a Nostr blob
+storage server (Blossom + NIP-96), for real use — it is not the minimal
+reference/smoke-test package (that's Start9's own `hello-world-startos`; see
+its `AGENTS.md` if you need that pattern instead).
+
+- **Two images, not one.** `route96` (upstream's own prebuilt
+  `voidic/route96` from Docker Hub) and `mariadb` (official image) run as
+  separate daemons in the same package; `route96` requires `mariadb`.
+  amd64/arm64 only — route96 does not publish a riscv64 image, so don't add
+  that arch here.
+- **The database is real state, not a smoke test.** `db` (MariaDB's data
+  directory) is backed up via `mysqldump`
+  (`sdk.Backups.withMysqlDump()`), not rsynced raw. `main` (uploaded blobs)
+  and `config` (the generated `config.yaml`, including the database
+  password) are rsynced. If you add config surface, keep the
+  `startos/fileModels/config.yaml.ts` shape close to upstream's actual
+  `Settings` struct (`src/settings.rs` in the upstream repo) — see its
+  doc comment convention.
+- **Admin auth is upstream's, not this package's.** The first pubkey to hit
+  an admin endpoint becomes admin; there is no admin-credential action to
+  maintain here. Don't add one.
+- See `UPDATING.md` for how the two image pins get bumped, and `README.md`
+  for the full inventory of what this package does and deliberately doesn't
+  configure (AI labeling, payments, legacy void.cat import).
