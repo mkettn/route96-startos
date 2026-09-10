@@ -1,6 +1,7 @@
 import { configYaml, defaultMaxUploadBytes } from '../fileModels/config.yaml'
 import { i18n } from '../i18n'
 import { sdk } from '../sdk'
+import { parseDbPassword, setDbConfigOverride } from '../utils'
 
 const { InputSpec, Value } = sdk
 
@@ -59,9 +60,26 @@ export const editSettings = sdk.Action.withInput(
   },
 
   // the execution function
-  async ({ effects, input }) =>
-    configYaml.merge(effects, {
-      max_upload_bytes: input.maxUploadMb * BYTES_PER_MB,
+  async ({ effects, input }) => {
+    const config = await configYaml.read().once()
+    if (!config) throw new Error('config.yaml not found')
+
+    const maxUploadBytes = input.maxUploadMb * BYTES_PER_MB
+    await configYaml.merge(effects, {
+      max_upload_bytes: maxUploadBytes,
+      // `whitelist` is exempt from route96's DB config layer (see
+      // setDbConfigOverride) — the file alone governs it, no write-through
+      // needed.
       whitelist: input.whitelist ? true : undefined,
-    }),
+    })
+
+    // config.yaml alone is not enough for max_upload_bytes — see
+    // setDbConfigOverride for why.
+    await setDbConfigOverride(
+      effects,
+      parseDbPassword(config.database),
+      'max_upload_bytes',
+      String(maxUploadBytes),
+    )
+  },
 )

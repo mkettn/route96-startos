@@ -1,7 +1,11 @@
 import { configYaml } from '../fileModels/config.yaml'
 import { i18n } from '../i18n'
 import { sdk } from '../sdk'
-import { getPublishedUrls } from '../utils'
+import {
+  getPublishedUrls,
+  parseDbPassword,
+  setDbConfigOverride,
+} from '../utils'
 
 const { InputSpec, Value } = sdk
 
@@ -45,6 +49,18 @@ export const setPublicUrl = sdk.Action.withInput(
   }),
 
   // the execution function
-  async ({ effects, input }) =>
-    configYaml.merge(effects, { public_url: input.url }),
+  async ({ effects, input }) => {
+    const config = await configYaml.read().once()
+    if (!config) throw new Error('config.yaml not found')
+
+    await configYaml.merge(effects, { public_url: input.url })
+
+    // config.yaml alone is not enough — see setDbConfigOverride for why.
+    await setDbConfigOverride(
+      effects,
+      parseDbPassword(config.database),
+      'public_url',
+      input.url,
+    )
+  },
 )

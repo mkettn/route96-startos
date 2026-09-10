@@ -92,6 +92,24 @@ Upstream's AI labeling (`label_models`, `label_flag_terms`), payments
 intentionally omitted — see
 [Limitations and Differences](#limitations-and-differences).
 
+**`config.yaml` is not the whole story for `public_url`/`max_upload_bytes`.**
+route96 v0.7.0 (the pinned image) layers a DB-backed config source on top of
+the file (`src/db_config.rs`): every start, it seeds each scalar
+`config.yaml` key into a `config` table with `INSERT IGNORE`, and from then
+on a row that exists there always overrides the file — for good, since
+nothing ever clears it. Upstream's skip list for that seeding (keys left to
+the file alone: `database`, `storage_dir`, `listen`, `models_dir`,
+`whitelist`, `payments`) does **not** include `public_url` or
+`max_upload_bytes` in v0.7.0 — that gap was only closed upstream after this
+image was built. So `startos/actions/setPublicUrl.ts` and
+`editSettings.ts` both write the new value straight into the `config` table
+too (`setDbConfigOverride` in `startos/utils.ts`), via a throwaway `mysql`
+client in a temp subcontainer — the same effect `PUT /admin/config/{key}`
+would have, without needing an admin's Nostr signature. `whitelist` doesn't
+need this: it's in the skip list, so the file alone still governs it. Drop
+`setDbConfigOverride` (and its two call sites) once the image pin moves past
+the upstream fix.
+
 ## Dependencies
 
 None. MariaDB runs as a bundled sidecar container, not a separate StartOS

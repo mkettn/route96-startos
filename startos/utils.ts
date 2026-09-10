@@ -50,3 +50,42 @@ export function getPublishedUrls(effects: T.Effects): Promise<string[]> {
     })
     .const()
 }
+
+// route96 v0.7.0 layers a DB-backed config source on top of config.yaml
+// (src/db_config.rs): on every start, `seed_from_settings` INSERT-IGNOREs
+// each scalar config.yaml key into the `config` table, and any row already
+// there always wins over the file from then on. Its skip list (keys the
+// seeder deliberately leaves alone, e.g. `database`, `whitelist`) does NOT
+// include `public_url` or `max_upload_bytes` in v0.7.0 — that omission was
+// only fixed upstream after this image was built — so once the first boot
+// seeds a row for either key, merely rewriting config.yaml is a no-op
+// forever after. Write the same value straight into the `config` table
+// (mirroring what `PUT /admin/config/{key}` does server-side) so an edit
+// actually takes effect. Remove this once the pinned image ships upstream's
+// fix and its seeder starts skipping these keys itself.
+export async function setDbConfigOverride(
+  effects: T.Effects,
+  dbPassword: string,
+  key: string,
+  value: string,
+): Promise<void> {
+  const escaped = value.replace(/'/g, "''")
+  await sdk.SubContainer.withTemp(
+    effects,
+    { imageId: 'mariadb' },
+    sdk.Mounts.of(),
+    'route96-config-write',
+    (sub) =>
+      sub.execFail([
+        'mysql',
+        '-h',
+        '127.0.0.1',
+        '-u',
+        dbUser,
+        `-p${dbPassword}`,
+        dbName,
+        '-e',
+        `insert into config (\`key\`, \`value\`) values ('${key}', '${escaped}') on duplicate key update \`value\` = values(\`value\`), \`updated\` = current_timestamp;`,
+      ]),
+  )
+}
