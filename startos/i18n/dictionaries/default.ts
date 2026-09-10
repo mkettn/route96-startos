@@ -11,6 +11,11 @@ const dict = {
   'Public URL': 6,
   'Uploaded files are linked from ${url}': 7,
   'No public URL is set. Use the "Set Public URL" action to select one.': 8,
+  Database: 19,
+  'MariaDB is not accepting connections': 20,
+
+  // actions/setPublicUrl.ts
+  'No published address is available to select yet. Wait for a clearnet/Tor/LAN address to come up, then try again.': 21,
 
   // interfaces.ts
   'Web UI': 9,

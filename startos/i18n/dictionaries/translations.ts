@@ -21,6 +21,9 @@ export default {
     16: 'Cuando está activado, solo las claves públicas añadidas a la lista blanca desde el panel de administración de route96 pueden subir archivos. Las descargas siguen abiertas para todos en cualquier caso.',
     17: 'Editar configuración',
     18: 'Configura el límite de tamaño de subida y la lista blanca de subidas.',
+    19: 'Base de datos',
+    20: 'MariaDB no está aceptando conexiones',
+    21: 'Todavía no hay ninguna dirección publicada para seleccionar. Espera a que aparezca una dirección clearnet/Tor/LAN y vuelve a intentarlo.',
   },
   de_DE: {
     0: 'Route96 wird gestartet!',
@@ -42,6 +45,9 @@ export default {
     16: 'Wenn aktiviert, dürfen nur Pubkeys, die über das route96-Admin-Dashboard zur Whitelist hinzugefügt wurden, Dateien hochladen. Downloads bleiben in jedem Fall für alle offen.',
     17: 'Einstellungen bearbeiten',
     18: 'Konfigurieren Sie das Upload-Größenlimit und die Upload-Whitelist.',
+    19: 'Datenbank',
+    20: 'MariaDB nimmt keine Verbindungen an',
+    21: 'Es ist noch keine veröffentlichte Adresse zur Auswahl verfügbar. Warten Sie, bis eine Clearnet-/Tor-/LAN-Adresse verfügbar ist, und versuchen Sie es erneut.',
   },
   pl_PL: {
     0: 'Uruchamianie Route96!',
@@ -63,6 +69,9 @@ export default {
     16: 'Gdy ta opcja jest włączona, pliki mogą przesyłać tylko klucze publiczne dodane do białej listy z panelu administracyjnego route96. Pobieranie pozostaje otwarte dla wszystkich niezależnie od tego.',
     17: 'Edytuj ustawienia',
     18: 'Skonfiguruj limit rozmiaru przesyłania i białą listę przesyłania.',
+    19: 'Baza danych',
+    20: 'MariaDB nie akceptuje połączeń',
+    21: 'Nie ma jeszcze żadnego opublikowanego adresu do wyboru. Poczekaj, aż pojawi się adres clearnet/Tor/LAN, a następnie spróbuj ponownie.',
   },
   fr_FR: {
     0: 'Démarrage de Route96 !',
@@ -84,5 +93,8 @@ export default {
     16: "Une fois activée, seules les clés publiques ajoutées à la liste blanche depuis le tableau de bord d'administration de route96 peuvent envoyer des fichiers. Les téléchargements restent ouverts à tous dans tous les cas.",
     17: 'Modifier les paramètres',
     18: "Configurez la limite de taille d'envoi et la liste blanche d'envoi.",
+    19: 'Base de données',
+    20: "MariaDB n'accepte pas les connexions",
+    21: "Aucune adresse publiée n'est encore disponible à sélectionner. Attendez qu'une adresse clearnet/Tor/LAN soit disponible, puis réessayez.",
   },
 } satisfies Record<string, LangDict>

@@ -104,11 +104,23 @@ the file alone: `database`, `storage_dir`, `listen`, `models_dir`,
 image was built. So `startos/actions/setPublicUrl.ts` and
 `editSettings.ts` both write the new value straight into the `config` table
 too (`setDbConfigOverride` in `startos/utils.ts`), via a throwaway `mysql`
-client in a temp subcontainer — the same effect `PUT /admin/config/{key}`
-would have, without needing an admin's Nostr signature. `whitelist` doesn't
-need this: it's in the skip list, so the file alone still governs it. Drop
-`setDbConfigOverride` (and its two call sites) once the image pin moves past
-the upstream fix.
+client in a temp subcontainer, **before** touching `config.yaml`. Order
+matters: route96's config watcher (`src/config_watcher.rs`) only rebuilds
+settings on a config-file change event — despite its own doc comment
+claiming a periodic DB poll, no such poll is actually wired up in v0.7.0 —
+so writing the DB row first means the file write's reload event is what
+picks the new value up immediately; writing the file first would trigger a
+reload that still sees the stale DB row and the edit wouldn't take effect
+until a restart. Together the two writes have the same effect
+`PUT /admin/config/{key}` would have, without needing an admin's Nostr
+signature. `whitelist` doesn't need any of this: it's in the skip list, so
+the file alone still governs it, and its own write already drives the
+reload.
+
+Removing `setDbConfigOverride` once the image pin moves past the upstream
+fix is a **two-step**, not a delete-and-done — see `UPDATING.md`, since
+`should_skip` only gates seeding and any row this package already wrote
+keeps overriding the file forever otherwise.
 
 ## Dependencies
 

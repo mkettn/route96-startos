@@ -79,7 +79,11 @@ export const main = sdk.setupMain(async ({ effects }) => {
         },
       },
       ready: {
-        display: null,
+        display: i18n('Database'),
+        // 'failure' results are softened to 'starting' automatically for
+        // the length of this window (see the Ready type), so it's safe to
+        // report a real failure below rather than papering over one with
+        // 'loading' forever.
         gracePeriod: 120_000,
         fn: async () => {
           const res = await mariadbSub.exec([
@@ -87,10 +91,14 @@ export const main = sdk.setupMain(async ({ effects }) => {
             '--connect',
             '--innodb_initialized',
           ])
-          return {
-            result: res.exitCode === 0 ? 'success' : 'loading',
-            message: null,
-          }
+          return res.exitCode === 0
+            ? { result: 'success', message: null }
+            : {
+                result: 'failure',
+                message:
+                  String(res.stderr).trim() ||
+                  i18n('MariaDB is not accepting connections'),
+              }
         },
       },
       requires: [],
@@ -115,9 +123,12 @@ export const main = sdk.setupMain(async ({ effects }) => {
       ready: {
         display: i18n('Public URL'),
         fn: async () => {
-          const current = await configYaml
-            .read((c) => c.public_url)
-            .const(effects)
+          // .once(), not .const(): this fn is already re-invoked on a
+          // ~30s poll interval by the health-check trigger, so .const()
+          // here would register a fresh durable subscription (and a
+          // suspended fs.watch) on every single poll, forever, none of
+          // them ever torn down.
+          const current = await configYaml.read((c) => c.public_url).once()
           return current
             ? {
                 result: 'success',

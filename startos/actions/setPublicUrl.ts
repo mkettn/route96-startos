@@ -19,7 +19,11 @@ export const inputSpec = InputSpec.of({
         (obj, url) => ({ ...obj, [url]: url }),
         {} as Record<string, string>,
       ),
-      default: '',
+      // Falls back to '' when nothing is published yet (e.g. immediately
+      // after install, before any interface address is up) — '' is never a
+      // legal selection, so the execution function below rejects it rather
+      // than silently clearing a previously configured URL.
+      default: urls[0] ?? '',
     }
   }),
 })
@@ -35,7 +39,11 @@ export const setPublicUrl = sdk.Action.withInput(
       'Choose which of your published addresses route96 should embed in upload links and advertise to Nostr clients as its public URL.',
     ),
     warning: null,
-    allowedStatuses: 'any',
+    // Setting this requires a live mariadb to write the DB-side override
+    // through to (see setDbConfigOverride) — a stopped service has neither
+    // that connection nor, on a never-started install, the `config` table
+    // migrations create at first boot.
+    allowedStatuses: 'only-running',
     group: null,
     visibility: 'enabled',
   }),
@@ -50,17 +58,27 @@ export const setPublicUrl = sdk.Action.withInput(
 
   // the execution function
   async ({ effects, input }) => {
+    if (!input.url) {
+      throw new Error(
+        i18n(
+          'No published address is available to select yet. Wait for a clearnet/Tor/LAN address to come up, then try again.',
+        ),
+      )
+    }
+
     const config = await configYaml.read().once()
-    if (!config) throw new Error('config.yaml not found')
+    if (!config) throw new Error(i18n('config.yaml not found'))
 
-    await configYaml.merge(effects, { public_url: input.url })
-
-    // config.yaml alone is not enough — see setDbConfigOverride for why.
+    // Must precede the config.yaml write below — see setDbConfigOverride's
+    // "CALL ORDER MATTERS" note. route96 only rebuilds its settings on a
+    // config-file event, and that rebuild is what picks up this row.
     await setDbConfigOverride(
       effects,
       parseDbPassword(config.database),
       'public_url',
       input.url,
     )
+
+    await configYaml.merge(effects, { public_url: input.url })
   },
 )

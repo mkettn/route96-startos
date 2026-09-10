@@ -44,3 +44,22 @@ updated independently.
 3. Bump `version` in `startos/versions/current.ts` to
    `<route96 version>:<package revision>`, resetting the revision to `0` on
    a route96 version bump, incrementing it for a packaging-only change.
+4. **If the route96 bump crosses the `#93` fix** (the commit that adds
+   `public_url` and `max_upload_bytes` to `should_skip` in
+   `src/db_config.rs` — check with
+   `git log --oneline -- src/db_config.rs` in the upstream repo, or just
+   diff `should_skip` between the old and new tag), `setDbConfigOverride`
+   in `startos/utils.ts` and its two call sites
+   (`startos/actions/setPublicUrl.ts`, `startos/actions/editSettings.ts`)
+   become dead weight, but removing them is a **two-step**, not one:
+   - Drop the helper and its call sites (`configYaml.merge` alone is
+     sufficient again once upstream stops seeding these keys from the
+     file).
+   - **Also** delete the rows this package ever wrote, e.g.
+     `DELETE FROM config WHERE \`key\` IN ('public_url', 'max_upload_bytes');`
+     against the `route96` database — `should_skip` only gates *seeding*;
+     `DbConfigSource::collect` still reads whatever rows already exist, so
+     skipping step one leaves this package's old overrides in permanent
+     effect with no code left able to change them. A migration in
+     `startos/versions/` is the right place to run that `DELETE` for
+     existing installs.

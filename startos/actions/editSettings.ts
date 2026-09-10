@@ -40,7 +40,11 @@ export const editSettings = sdk.Action.withInput(
     name: i18n('Edit Settings'),
     description: i18n('Configure the upload size limit and upload whitelist.'),
     warning: null,
-    allowedStatuses: 'any',
+    // Setting the upload size requires a live mariadb to write the DB-side
+    // override through to (see setDbConfigOverride) — a stopped service has
+    // neither that connection nor, on a never-started install, the `config`
+    // table migrations create at first boot.
+    allowedStatuses: 'only-running',
     group: null,
     visibility: 'enabled',
   }),
@@ -62,24 +66,26 @@ export const editSettings = sdk.Action.withInput(
   // the execution function
   async ({ effects, input }) => {
     const config = await configYaml.read().once()
-    if (!config) throw new Error('config.yaml not found')
+    if (!config) throw new Error(i18n('config.yaml not found'))
 
     const maxUploadBytes = input.maxUploadMb * BYTES_PER_MB
-    await configYaml.merge(effects, {
-      max_upload_bytes: maxUploadBytes,
-      // `whitelist` is exempt from route96's DB config layer (see
-      // setDbConfigOverride) — the file alone governs it, no write-through
-      // needed.
-      whitelist: input.whitelist ? true : undefined,
-    })
 
-    // config.yaml alone is not enough for max_upload_bytes — see
-    // setDbConfigOverride for why.
+    // Must precede the config.yaml write below — see setDbConfigOverride's
+    // "CALL ORDER MATTERS" note. route96 only rebuilds its settings on a
+    // config-file event, and that rebuild is what picks up this row.
     await setDbConfigOverride(
       effects,
       parseDbPassword(config.database),
       'max_upload_bytes',
       String(maxUploadBytes),
     )
+
+    await configYaml.merge(effects, {
+      max_upload_bytes: maxUploadBytes,
+      // `whitelist` is exempt from route96's DB config layer (see
+      // setDbConfigOverride) — the file alone governs it, and the same file
+      // write already drives its reload, so no write-through is needed here.
+      whitelist: input.whitelist ? true : undefined,
+    })
   },
 )
