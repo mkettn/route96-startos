@@ -83,8 +83,13 @@ export const main = sdk.setupMain(async ({ effects }) => {
         // 'failure' results are softened to 'starting' automatically for
         // the length of this window (see the Ready type), so it's safe to
         // report a real failure below rather than papering over one with
-        // 'loading' forever.
-        gracePeriod: 120_000,
+        // 'loading' forever. 300s, not 120s: this is the budget for
+        // MariaDB's slowest boot — first-run mysql_install_db plus initial
+        // InnoDB datadir creation — which on arm64 + SD-card storage can
+        // run long enough to blow past a tighter window and flash red
+        // before recovering on its own. Success short-circuits this, so
+        // the extra headroom costs nothing on faster storage.
+        gracePeriod: 300_000,
         fn: async () => {
           const res = await mariadbSub.exec([
             'healthcheck.sh',

@@ -14,9 +14,6 @@ const dict = {
   Database: 19,
   'MariaDB is not accepting connections': 20,
 
-  // actions/setPublicUrl.ts
-  'No published address is available to select yet. Wait for a clearnet/Tor/LAN address to come up, then try again.': 21,
-
   // interfaces.ts
   'Web UI': 9,
   'The route96 dashboard, and the address Nostr clients use for Blossom/NIP-96 uploads': 10,
@@ -24,6 +21,7 @@ const dict = {
   // actions/setPublicUrl.ts
   'Set Public URL': 11,
   'Choose which of your published addresses route96 should embed in upload links and advertise to Nostr clients as its public URL.': 12,
+  'No published address is available to select yet. Wait for a clearnet/Tor/LAN address to come up, then try again.': 21,
 
   // actions/editSettings.ts
   'Max Upload Size': 13,

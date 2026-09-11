@@ -55,11 +55,15 @@ updated independently.
    - Drop the helper and its call sites (`configYaml.merge` alone is
      sufficient again once upstream stops seeding these keys from the
      file).
-   - **Also** delete the rows this package ever wrote, e.g.
-     `DELETE FROM config WHERE \`key\` IN ('public_url', 'max_upload_bytes');`
-     against the `route96` database — `should_skip` only gates *seeding*;
-     `DbConfigSource::collect` still reads whatever rows already exist, so
-     skipping step one leaves this package's old overrides in permanent
-     effect with no code left able to change them. A migration in
-     `startos/versions/` is the right place to run that `DELETE` for
-     existing installs.
+   - **Also** delete the rows this package ever wrote, against the
+     `route96` database:
+
+     ```sql
+     DELETE FROM config WHERE `key` IN ('public_url', 'max_upload_bytes');
+     ```
+
+     `should_skip` only gates *seeding*; `DbConfigSource::collect` still
+     reads whatever rows already exist, so skipping this second step
+     leaves this package's old overrides in permanent effect with no code
+     left able to change them. A migration in `startos/versions/` is the
+     right place to run that `DELETE` for existing installs.
