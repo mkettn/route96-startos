@@ -1,9 +1,20 @@
 name: Tag and Release
 
+# Disabled for now: this reusable workflow expects a real registry/S3
+# destination (vars.REFERENCE_REGISTRY / RELEASE_REGISTRY / S3_S9PKS_BASE_URL)
+# and a signing identity (secrets.DEV_KEY / S3_ACCESS_KEY / S3_SECRET_KEY).
+# None of those are configured for this repo, so the first real push to
+# master after leaving the hello-world scaffold failed at "Check production
+# registry" (empty registry URL -> start-cli exit 38). Until this repo has
+# somewhere to actually publish to, get the .s9pk from the "Build" workflow's
+# artifact on each PR instead. Re-enable by restoring the `push:` trigger
+# below once those variables/secrets are set (Settings -> Secrets and
+# variables -> Actions).
 on:
-  push:
-    branches: ['master']
-    paths-ignore: ['*.md']
+  workflow_dispatch:
+  # push:
+  #   branches: ['master']
+  #   paths-ignore: ['*.md']
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}

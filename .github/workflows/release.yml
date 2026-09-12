@@ -1,9 +1,15 @@
 name: Release
 
+# Disabled for now, alongside tagAndRelease.yml — this repo has no release
+# registry/S3 destination or signing key configured yet, and this workflow
+# only ever fires from a tag tagAndRelease.yml creates, which is itself
+# disabled. See the comment there for what to configure before re-enabling
+# the `push:` trigger below.
 on:
-  push:
-    tags:
-      - 'v*.*'
+  workflow_dispatch:
+  # push:
+  #   tags:
+  #     - 'v*.*'
 
 jobs:
   release:
