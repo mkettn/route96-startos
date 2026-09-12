@@ -1,43 +1,154 @@
+import { configYaml, storageDir } from './fileModels/config.yaml'
 import { i18n } from './i18n'
 import { sdk } from './sdk'
-import { uiPort } from './utils'
+import {
+  dbName,
+  dbUser,
+  mariadbDatadir,
+  parseDbPassword,
+  uiPort,
+} from './utils'
 
 export const main = sdk.setupMain(async ({ effects }) => {
   /**
-   * ======================== Setup (optional) ========================
-   *
-   * In this section, we fetch any resources or run any desired preliminary commands.
+   * ======================== Setup ========================
    */
-  console.info(i18n('Starting Hello World!'))
+  console.info(i18n('Starting Route96!'))
+
+  const config = await configYaml.read().const(effects)
+  if (!config) throw new Error(i18n('config.yaml not found'))
+
+  const dbPassword = parseDbPassword(config.database)
+
+  if (!config.public_url) {
+    console.warn(
+      i18n(
+        'No public URL is set. Links to uploaded files will be broken until the "Set Public URL" action is run.',
+      ),
+    )
+  }
+
+  /**
+   * ======================== Set containers ========================
+   */
+  const mariadbSub = sdk.SubContainer.of(
+    effects,
+    { imageId: 'mariadb' },
+    sdk.Mounts.of().mountVolume({
+      volumeId: 'db',
+      subpath: null,
+      mountpoint: mariadbDatadir,
+      readonly: false,
+    }),
+    'mariadb-sub',
+  )
+
+  const route96Sub = sdk.SubContainer.of(
+    effects,
+    { imageId: 'route96' },
+    sdk.Mounts.of()
+      .mountVolume({
+        volumeId: 'main',
+        subpath: null,
+        mountpoint: storageDir,
+        readonly: false,
+      })
+      .mountVolume({
+        volumeId: 'config',
+        subpath: 'config.yaml',
+        mountpoint: '/app/config.yaml',
+        readonly: true,
+        type: 'file',
+      }),
+    'route96-sub',
+  )
 
   /**
    * ======================== Daemons ========================
-   *
-   * In this section, we create one or more daemons that define the service runtime.
-   *
-   * Each daemon defines its own health check, which can optionally be exposed to the user.
    */
-  return sdk.Daemons.of(effects).addDaemon('primary', {
-    subcontainer: sdk.SubContainer.of(
-      effects,
-      { imageId: 'hello-world' },
-      sdk.Mounts.of().mountVolume({
-        volumeId: 'main',
-        subpath: null,
-        mountpoint: '/data',
-        readonly: false,
-      }),
-      'hello-world-sub',
-    ),
-    exec: { command: ['hello-world'] },
-    ready: {
-      display: i18n('Web Interface'),
-      fn: () =>
-        sdk.healthCheck.checkPortListening(effects, uiPort, {
-          successMessage: i18n('The web interface is ready'),
-          errorMessage: i18n('The web interface is not ready'),
-        }),
-    },
-    requires: [],
-  })
+  return sdk.Daemons.of(effects)
+    .addDaemon('mariadb', {
+      subcontainer: mariadbSub,
+      exec: {
+        command: sdk.useEntrypoint(['--bind-address=127.0.0.1']),
+        env: {
+          MARIADB_RANDOM_ROOT_PASSWORD: '1',
+          MYSQL_DATABASE: dbName,
+          MYSQL_USER: dbUser,
+          MYSQL_PASSWORD: dbPassword,
+        },
+      },
+      ready: {
+        display: i18n('Database'),
+        // 'failure' results are softened to 'starting' automatically for
+        // the length of this window (see the Ready type), so it's safe to
+        // report a real failure below rather than papering over one with
+        // 'loading' forever. 300s, not 120s: this is the budget for
+        // MariaDB's slowest boot — first-run mysql_install_db plus initial
+        // InnoDB datadir creation — which on arm64 + SD-card storage can
+        // run long enough to blow past a tighter window and flash red
+        // before recovering on its own. Success short-circuits this, so
+        // the extra headroom costs nothing on faster storage.
+        gracePeriod: 300_000,
+        fn: async () => {
+          const res = await mariadbSub.exec([
+            'healthcheck.sh',
+            '--connect',
+            '--innodb_initialized',
+          ])
+          return res.exitCode === 0
+            ? { result: 'success', message: null }
+            : {
+                result: 'failure',
+                message:
+                  String(res.stderr).trim() ||
+                  i18n('MariaDB is not accepting connections'),
+              }
+        },
+      },
+      requires: [],
+    })
+    .addDaemon('route96', {
+      subcontainer: route96Sub,
+      exec: {
+        command: sdk.useEntrypoint(),
+        env: { RUST_LOG: 'info' },
+      },
+      ready: {
+        display: i18n('Web Interface'),
+        fn: () =>
+          sdk.healthCheck.checkPortListening(effects, uiPort, {
+            successMessage: i18n('The web interface is ready'),
+            errorMessage: i18n('The web interface is not ready'),
+          }),
+      },
+      requires: ['mariadb'],
+    })
+    .addHealthCheck('public-url', {
+      ready: {
+        display: i18n('Public URL'),
+        fn: async () => {
+          // .once(), not .const(): this fn is already re-invoked on a
+          // ~30s poll interval by the health-check trigger, so .const()
+          // here would register a fresh durable subscription (and a
+          // suspended fs.watch) on every single poll, forever, none of
+          // them ever torn down.
+          const current = await configYaml.read((c) => c.public_url).once()
+          return current
+            ? {
+                result: 'success',
+                message: i18n('Uploaded files are linked from ${url}', {
+                  url: current,
+                }),
+              }
+            : {
+                result: 'failure',
+                message: i18n(
+                  'No public URL is set. Use the "Set Public URL" action to select one.',
+                ),
+              }
+        },
+      },
+      requires: ['route96'],
+    })
 })

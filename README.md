@@ -1,18 +1,25 @@
 <p align="center">
-  <img src="icon.svg" alt="Hello World Logo" width="21%">
+  <img src="icon.svg" alt="Route96 Logo" width="21%">
 </p>
 
-# Hello World on StartOS
+# Route96 on StartOS
 
 > Everything not listed in this document should behave the same as upstream
-> Hello World. If a feature, setting, or behavior is not mentioned here, the
+> Route96. If a feature, setting, or behavior is not mentioned here, the
 > upstream documentation is accurate and fully applicable — see the
 > Documentation section of `instructions.md` for links.
 
-[Hello World](https://github.com/Start9Labs/hello-world) is Start9's demonstration service: a single page that proves a package installs, starts, publishes an address, and can be backed up. It exists to be the simplest possible working example of a StartOS package, and this repository is the reference a new package is measured against.
+[Route96](https://github.com/v0l/route96) is a decentralized blob storage
+server for the Nostr ecosystem, implementing the
+[Blossom](https://github.com/hzrd149/blossom) and
+[NIP-96](https://github.com/nostr-protocol/nips/blob/master/96.md) protocols.
+It stores images, video, and other files uploaded by Nostr clients, with
+Nostr-key authentication, optional upload whitelisting, automatic
+thumbnail/WebP generation, and a web dashboard for moderation and user
+management.
 
-- **Upstream repo:** <https://github.com/Start9Labs/hello-world>
-- **Wrapper repo:** <https://github.com/Start9Labs/hello-world-startos>
+- **Upstream repo:** <https://github.com/v0l/route96>
+- **Wrapper repo:** <https://github.com/mkettn/route96-startos>
 
 ---
 
@@ -35,104 +42,221 @@
 
 ## Image and Container Runtime
 
-One image, and it is the only package here built for every architecture StartOS supports.
+Two images: the upstream Route96 binary/UI, prebuilt by upstream's own CI, and
+official MariaDB, used unmodified as the metadata store.
 
-| Property      | Value                            |
-| ------------- | -------------------------------- |
-| Image         | `ghcr.io/start9labs/hello-world` |
-| Architectures | x86_64, aarch64, **riscv64**     |
-| Command       | `hello-world`                    |
+| Property      | Value                          |
+| ------------- | ------------------------------- |
+| Image         | `voidic/route96:v0.7.0`         |
+| Architectures | x86_64, aarch64                 |
+| Command       | upstream entrypoint (`route96`) |
 
-| Subcontainer      | Purpose                                       |
-| ----------------- | --------------------------------------------- |
-| `hello-world-sub` | The `primary` daemon — the one to `attach` to |
+| Subcontainer  | Purpose                                                   |
+| ------------- | ---------------------------------------------------------- |
+| `route96-sub` | The `route96` daemon — the one to `attach` to, serves the API and dashboard on port 8000 |
+| `mariadb-sub` | The `mariadb` daemon — MariaDB `10.11` (LTS), holds all file/user/moderation metadata |
 
-riscv64 is included because this package doubles as the smoke test for a new StartOS platform: if Hello World installs and starts, the packaging runtime works there.
+`route96` requires `mariadb` to be ready (`healthcheck.sh --connect
+--innodb_initialized`) before it starts.
+
+**MariaDB is pinned to the 10.x line on purpose — do not bump it to 11.x.**
+MariaDB removed the `mysql`/`mysqldump`/`mysql_install_db` compatibility
+symlinks starting at 11.x (only the renamed `mariadb`/`mariadb-dump`/
+`mariadb-install-db` binaries remain). The SDK's own `Backups.withMysqlDump`
+invokes the literal `mysql`/`mysqldump` names unconditionally, and so does
+this package's `setDbConfigOverride` (see below) — against an 11.x image
+both fail with `No such file or directory (os error 2)`, silently breaking
+backups and making every "Set Public URL"/"Edit Settings" action call fail.
+
+The upstream image ships with the `blossom`, `nip96`, `react-ui`, `r96util`,
+`media-compression`, and `labels` Cargo features compiled in. AI content
+labeling (`label_models` in upstream's `config.yaml`) and Lightning payments
+(`payments` feature — not compiled into this image) are not configured by
+this package; see [Limitations and Differences](#limitations-and-differences).
 
 ## Volume and Data Layout
 
-One volume, and effectively nothing in it.
-
-| Volume | Mount Point | Purpose                             |
-| ------ | ----------- | ----------------------------------- |
-| `main` | `/data`     | Mounted, but the app writes nothing |
-
-The volume is here to demonstrate the shape a package takes, not because there is state to keep.
+| Volume   | Mount Point (in `route96-sub`) | Purpose                                              |
+| -------- | ------------------------------- | ----------------------------------------------------- |
+| `main`   | `/app/data`                     | Uploaded blobs, thumbnails, and derived media          |
+| `config` | `/app/config.yaml` (file mount) | The generated `config.yaml`, including the database URL |
+| `db`     | `/var/lib/mysql` (in `mariadb-sub`) | MariaDB's data directory                          |
 
 ## File Models
 
-None. There is no configuration file and nothing for the package to write.
+One file model, `config.yaml` (`startos/fileModels/config.yaml.ts`), mirrors
+upstream's own config file format. It is generated by the package — it is
+not directly user-editable — and combines:
+
+- Fixed/enforced fields wired to the container's mounts: `listen`
+  (`0.0.0.0:8000`), `storage_dir` (`/app/data`).
+- `database`: a `mysql://` connection string with a random password,
+  generated once at install time (`startos/init/seedFiles.ts`) and left
+  unchanged afterward.
+- User-configurable fields, written by the [Actions](#actions) below:
+  `public_url`, `max_upload_bytes`, `whitelist`.
+
+Upstream's AI labeling (`label_models`, `label_flag_terms`), payments
+(`payments`), and legacy void.cat import (`void_cat_files`) keys are
+intentionally omitted — see
+[Limitations and Differences](#limitations-and-differences).
+
+**`config.yaml` is not the whole story for `public_url`/`max_upload_bytes`.**
+route96 v0.7.0 (the pinned image) layers a DB-backed config source on top of
+the file (`src/db_config.rs`): every start, it seeds each scalar
+`config.yaml` key into a `config` table with `INSERT IGNORE`, and from then
+on a row that exists there always overrides the file — for good, since
+nothing ever clears it. Upstream's skip list for that seeding (keys left to
+the file alone: `database`, `storage_dir`, `listen`, `models_dir`,
+`whitelist`, `payments`) does **not** include `public_url` or
+`max_upload_bytes` in v0.7.0 — that gap was only closed upstream after this
+image was built. So `startos/actions/setPublicUrl.ts` and
+`editSettings.ts` both write the new value straight into the `config` table
+too (`setDbConfigOverride` in `startos/utils.ts`), via a throwaway `mysql`
+client in a temp subcontainer, **before** touching `config.yaml`. Order
+matters: route96's config watcher (`src/config_watcher.rs`) only rebuilds
+settings on a config-file change event — despite its own doc comment
+claiming a periodic DB poll, no such poll is actually wired up in v0.7.0 —
+so writing the DB row first means the file write's reload event is what
+picks the new value up immediately; writing the file first would trigger a
+reload that still sees the stale DB row and the edit wouldn't take effect
+until a restart. Together the two writes have the same effect
+`PUT /admin/config/{key}` would have, without needing an admin's Nostr
+signature. `whitelist` doesn't need any of this: it's in the skip list, so
+the file alone still governs it, and its own write already drives the
+reload.
+
+Removing `setDbConfigOverride` once the image pin moves past the upstream
+fix is a **two-step**, not a delete-and-done — see `UPDATING.md`, since
+`should_skip` only gates seeding and any row this package already wrote
+keeps overriding the file forever otherwise.
 
 ## Dependencies
 
-None.
+None. MariaDB runs as a bundled sidecar container, not a separate StartOS
+service dependency.
 
 ## Network Access and Interfaces
 
-One interface, serving the page.
+One interface, serving both the Blossom/NIP-96 API and the bundled React
+dashboard on the same port.
 
-| Interface | Id   | Type | Port | Description                      |
-| --------- | ---- | ---- | ---- | -------------------------------- |
-| Web UI    | `ui` | ui   | 80   | The web interface of Hello World |
+| Interface | Id   | Type | Port | Description                                                          |
+| --------- | ---- | ---- | ---- | ---------------------------------------------------------------------- |
+| Web UI    | `ui` | ui   | 8000 | The route96 dashboard, and the address Nostr clients use for uploads |
 
-The port is bound on the `ui-multi` MultiHost and is not masked.
+The interface is **unmasked** (`masked: false`): Nostr/Blossom clients need
+the real, stable address to talk to the API directly — a masked/rotating
+proxy address would break every previously-uploaded file's URL.
 
 ## Installation and First-Run Flow
 
-Nothing to configure and nothing to reveal. Install it, start it, open the address, and you should see the page. There is no task, no account, and no credential.
-
-**That is the whole test.** If the page loads, StartOS installed a package, started its daemon, published an address, and routed a request to it.
+1. Install and start the package. MariaDB initializes on first start; give
+   it a minute before Route96 reports ready.
+2. Run the **Set Public URL** action to choose which of your published
+   addresses (clearnet, Tor, LAN) Route96 should embed in upload links and
+   advertise to Nostr clients. Until this is set, the `public-url` health
+   check reports failure and links returned by the API will point at an
+   empty/incorrect host.
+3. There is no admin account to create. The **first** pubkey to
+   authenticate against any admin endpoint (`GET /admin/self`, etc. — via a
+   NIP-98-signed request) is automatically promoted to admin by Route96
+   itself. Everyone else starts as a regular, non-admin user.
 
 ## Actions
 
-None.
+| Action              | Purpose                                                                 |
+| -------------------- | ------------------------------------------------------------------------ |
+| **Set Public URL**   | Choose the published address embedded in upload links and NIP-96 server info |
+| **Edit Settings**    | Set the max upload size and toggle the database-backed upload whitelist  |
+
+Everything else — labels, moderation, banning, per-user quotas seen in
+upstream's admin API — is managed from Route96's own admin dashboard
+(`GET /admin/*`), not from StartOS actions, since it requires Nostr-key
+authentication upstream already handles.
 
 ## Tasks
 
-None. This package raises no tasks, so the service is never held on a prompt and its ordinary controls are always available.
+None. Route96 needs no configuration before it can start — MariaDB
+provisions itself from generated credentials at install time, and
+`public_url` merely needs to be set afterward via the action above, not
+before the service can run.
 
 ## Health Checks
 
-One check, on the only daemon.
-
-| Check     | Displayed       | Method               |
-| --------- | --------------- | -------------------- |
-| `primary` | "Web Interface" | Port 80 is listening |
-
-A failure means the container did not start, which on a working StartOS should not happen — the service logs will say why.
+| Check         | Displayed     | Method                                                                 |
+| -------------- | ------------- | ------------------------------------------------------------------------ |
+| `mariadb`      | (hidden)      | `healthcheck.sh --connect --innodb_initialized` inside `mariadb-sub`    |
+| `route96`      | "Web Interface" | Port 8000 is listening                                                |
+| `public-url`   | "Public URL"  | Standalone check: reports failure until `public_url` is set (see above) |
 
 ## Backups and Restore
 
-The `main` volume is copied wholesale — `sdk.Backups.ofVolumes('main')`. In practice **the backup is empty**, because the app writes nothing. It is here so the backup and restore paths are exercised, not because there is anything to lose.
+- `main` (uploaded blobs) and `config` (`config.yaml`, including the
+  database password) are copied wholesale via rsync.
+- `db` (MariaDB's raw data directory) is **not** rsynced directly. Instead,
+  `sdk.Backups.withMysqlDump()` runs `mysqldump` against the live database
+  before backup and restores it with `mysql` on restore — the standard,
+  crash-safe way to back up a SQL database, avoiding a raw copy of files a
+  running database may still be writing to.
 
 ## Limitations and Differences
 
-1. **It does nothing.** That is the point — it is a demonstration and a smoke test, not a useful service.
-2. **No configuration, no actions, no state.**
-3. **The volume is mounted but unused.**
+1. **No AI content labeling.** Upstream's `label_models`/`label_flag_terms`
+   (HuggingFace ViT models for automatic NSFW/content flagging) are not
+   configured. The compiled-in `labels` feature stays dormant — no models
+   are downloaded, no labeling runs — because `config.yaml` omits the key
+   entirely, matching upstream's own documented behavior for an absent key.
+2. **No Lightning payments / storage quotas.** The upstream image is not
+   built with the `payments` feature, so paid storage tiers and LND
+   integration are unavailable regardless of configuration.
+3. **No legacy void.cat import.** `void_cat_files` is not exposed.
+4. **Whitelist is database-only.** The package always writes `whitelist:
+   true` (database-backed, managed from Route96's own admin UI) or omits the
+   key — never a static inline list or hot-reloaded file, which upstream
+   also supports but this package does not expose.
+5. **Admin/moderation is entirely upstream's own UI.** StartOS actions only
+   cover what upstream's `config.yaml` controls; banning, reviewing flagged
+   content, and managing individual users all happen in Route96's own
+   dashboard.
 
 ---
 
 ## Quick Reference for AI Consumers
 
 ```yaml
-package_id: hello-world
-image: ghcr.io/start9labs/hello-world
+package_id: route96
+images:
+  route96: voidic/route96:v0.7.0
+  mariadb: mariadb:10.11.19 # pinned to 10.x, see "Image and Container Runtime"
 architectures:
   - x86_64
   - aarch64
-  - riscv64
 subcontainers:
-  - hello-world-sub # the only container
+  - route96-sub # the primary daemon, attach here
+  - mariadb-sub
 volumes:
-  main: /data # mounted but unused
-file_models: []
-startos_managed_env_vars: []
+  main: /app/data # in route96-sub; uploaded blobs
+  config: /app/config.yaml # in route96-sub; file mount, generated config.yaml
+  db: /var/lib/mysql # in mariadb-sub
+file_models:
+  - config.yaml # startos/fileModels/config.yaml.ts
+startos_managed_env_vars:
+  - MARIADB_RANDOM_ROOT_PASSWORD
+  - MYSQL_DATABASE
+  - MYSQL_USER
+  - MYSQL_PASSWORD
+  - RUST_LOG
 dependencies: []
 interfaces:
-  ui: { type: ui, port: 80 }
-actions: []
+  ui: { type: ui, port: 8000, masked: false }
+actions:
+  - set-public-url
+  - edit-settings
 tasks: []
 health_checks:
-  - primary # displayed "Web Interface"
+  - mariadb # hidden (display: null)
+  - route96 # displayed "Web Interface"
+  - public-url # displayed "Public URL", standalone (addHealthCheck)
+backup_strategy: mysqldump (withMysqlDump) + rsync of main/config volumes
 ```
