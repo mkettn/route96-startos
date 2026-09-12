@@ -28,9 +28,26 @@ updated independently.
   `voidic/route96:<version>`, tags keep the leading `v`, e.g. `v0.7.0`).
 
 - **mariadb** (official image) — check for a new patch release within the
-  same major.minor (`11.4.x`) before jumping minors; a minor bump can change
+  same major.minor (`10.11.x`) before jumping minors; a minor bump can change
   on-disk data format. The pin lives in the same file at
   `images['mariadb'].source.dockerTag`.
+
+  **Stay on the 10.x line.** MariaDB removed the `mysql`/`mysqldump`/
+  `mysql_install_db` compatibility symlinks starting at 11.x — verify with:
+
+  ```sh
+  docker run --rm mariadb:<candidate-tag> sh -c 'ls -la /usr/bin/mysql /usr/bin/mysqldump'
+  ```
+
+  If that fails, don't pin it: the SDK's `Backups.withMysqlDump` (used in
+  `backups.ts`) and this package's own `setDbConfigOverride` (`utils.ts`)
+  both invoke those literal binary names unconditionally. An image without
+  them breaks backup/restore and every "Set Public URL"/"Edit Settings"
+  action call with `... failed with exit code 2: Filesystem I/O Error: No
+  such file or directory (os error 2)` — the exact symptom that got this
+  pin added in the first place. Also note that MariaDB cannot downgrade a
+  data directory across major versions, so an install that already ran
+  under a broken 11.x pin needs a fresh install, not just this fix.
 
 ## Applying the bump
 

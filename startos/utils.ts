@@ -99,6 +99,10 @@ export async function setDbConfigOverride(
     (sub) =>
       sub.execFail(
         [
+          // Literal 'mysql', not 'mariadb': relies on the compat symlink the
+          // 10.x image line ships (see the comment on the mariadb image pin
+          // in manifest/index.ts). An 11.x image has no /usr/bin/mysql and
+          // this exec fails with "No such file or directory (os error 2)".
           'mysql',
           '-h',
           '127.0.0.1',

@@ -54,10 +54,19 @@ official MariaDB, used unmodified as the metadata store.
 | Subcontainer  | Purpose                                                   |
 | ------------- | ---------------------------------------------------------- |
 | `route96-sub` | The `route96` daemon — the one to `attach` to, serves the API and dashboard on port 8000 |
-| `mariadb-sub` | The `mariadb` daemon — MariaDB `11.4.13`, holds all file/user/moderation metadata |
+| `mariadb-sub` | The `mariadb` daemon — MariaDB `10.11` (LTS), holds all file/user/moderation metadata |
 
 `route96` requires `mariadb` to be ready (`healthcheck.sh --connect
 --innodb_initialized`) before it starts.
+
+**MariaDB is pinned to the 10.x line on purpose — do not bump it to 11.x.**
+MariaDB removed the `mysql`/`mysqldump`/`mysql_install_db` compatibility
+symlinks starting at 11.x (only the renamed `mariadb`/`mariadb-dump`/
+`mariadb-install-db` binaries remain). The SDK's own `Backups.withMysqlDump`
+invokes the literal `mysql`/`mysqldump` names unconditionally, and so does
+this package's `setDbConfigOverride` (see below) — against an 11.x image
+both fail with `No such file or directory (os error 2)`, silently breaking
+backups and making every "Set Public URL"/"Edit Settings" action call fail.
 
 The upstream image ships with the `blossom`, `nip96`, `react-ui`, `r96util`,
 `media-compression`, and `labels` Cargo features compiled in. AI content
@@ -219,7 +228,7 @@ before the service can run.
 package_id: route96
 images:
   route96: voidic/route96:v0.7.0
-  mariadb: mariadb:11.4.13
+  mariadb: mariadb:10.11.19 # pinned to 10.x, see "Image and Container Runtime"
 architectures:
   - x86_64
   - aarch64

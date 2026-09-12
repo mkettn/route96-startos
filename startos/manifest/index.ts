@@ -16,8 +16,15 @@ export const manifest = setupManifest({
       source: { dockerTag: 'voidic/route96:v0.7.0' },
       arch: ['x86_64', 'aarch64'],
     },
+    // Pinned to the 10.x line deliberately — see UPDATING.md before bumping
+    // to 11.x. MariaDB dropped the mysql/mysqldump/mysql_install_db
+    // compatibility symlinks starting at 11.x; the SDK's Backups.withMysqlDump
+    // (and this package's own setDbConfigOverride in utils.ts) invoke those
+    // literal binary names unconditionally, so an 11.x image breaks both
+    // backup/restore and the config write-through with
+    // "No such file or directory (os error 2)".
     mariadb: {
-      source: { dockerTag: 'mariadb:11.4.13' },
+      source: { dockerTag: 'mariadb:10.11.19' },
       arch: ['x86_64', 'aarch64'],
     },
   },
